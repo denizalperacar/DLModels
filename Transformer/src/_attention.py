@@ -11,6 +11,8 @@ from time import time
 from copy import deepcopy
 from collections import OrderedDict
 
+import numpy as np 
+
 from torch.nn.modules.container import Sequential
 
 
@@ -291,23 +293,28 @@ if __name__ == "__main__":
     KDIM = 256
     QDIM = 256
     VDIM = 256
-    batch = 50
-    n = 256
+    batch = 10
+    n = 200
     h = 8
 
-    DEVICE = device("cuda:0")
-    t = time()
-    for i in range(200):
 
+    DEVICE = device("cuda:0")
+
+
+    tt = []
+    for i in range(1000):
+        t = time()
         x = randn(batch, n, VDIM).to(DEVICE)
         
-        enc = TransformerEncoder(2, QDIM, VDIM, h).to(DEVICE)
-        dec = TransformerDecoder(2, QDIM, VDIM, h).to(DEVICE)
+        enc = TransformerEncoder(6, QDIM, VDIM, h).to(DEVICE)
+        dec = TransformerDecoder(6, QDIM, VDIM, h).to(DEVICE)
 
         q_enc, k_enc = enc(x)
         out = dec(x, q_enc, k_enc, None)
 
-        print(out.shape)
-        print(memory_allocated(DEVICE))
-    print(time()-t)
+        # print(out.shape)
+        # print(memory_allocated(DEVICE))
+        tt.append(time()-t)
+    print(tt)
+    print(np.array(tt)[1:].mean())
 
