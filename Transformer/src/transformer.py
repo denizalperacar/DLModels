@@ -5,7 +5,9 @@ Linformer.
 Deniz A. ACAR
 """
 
-from torch import Tensor, bmm
+from torch import (
+    Tensor, bmm, dropout, cat
+    )   
 from torch.nn import Module, ModuleList, Linear
 from torch.nn.functional import softmax, leaky_relu, relu
 from copy import deepcopy
@@ -112,11 +114,34 @@ class KQV(Module):
 
 
 class MultiHeadAttention(Module):
-    "Implements different varients of MultiHead Attention"
+    "Implementation of the MultiHead Attention"
 
-    def __init__(self, dm, dq, dk, dv, h=2, ) -> None:
+    def __init__(self, dm, dq, dk, dv, h=2, dropout=None) -> None:
         super().__init__()
+        self.h = h
+        # project q, k, v
+        self.linear_q = LinearProject(dq, dq//h, n=h)
+        self.linear_k = LinearProject(dk, dk//h, n=h)
+        self.linear_v = LinearProject(dv, dv//h, n=h)
 
+        self.W0 = Linear(int(h*dm), dm)
+        self.dropout = dropout
+
+    def forward(self, q, k, v, mask=None):
+        out = []
+        qs = self.linear_q(q)
+        ks = self.linear_k(k)
+        vs = self.linear_v(v)
+
+        for ele in range(self.h):
+            out.append(
+                scaledDotProductAttention(
+                    qs[ele], ks[ele], vs[ele], mask, self.dropout
+                )
+            )
+        output = cat(out, 2)
+        return self.W0(output)
+        
 
 
 
