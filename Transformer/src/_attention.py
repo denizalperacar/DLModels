@@ -293,9 +293,9 @@ if __name__ == "__main__":
     KDIM = 256
     QDIM = 256
     VDIM = 256
-    batch = 10
-    n = 200
-    h = 8
+    batch = 1
+    n = 100
+    h = 4
 
 
     DEVICE = device("cuda:0")
@@ -306,8 +306,8 @@ if __name__ == "__main__":
         t = time()
         x = randn(batch, n, VDIM).to(DEVICE)
         
-        enc = TransformerEncoder(6, QDIM, VDIM, h).to(DEVICE)
-        dec = TransformerDecoder(6, QDIM, VDIM, h).to(DEVICE)
+        enc = TransformerEncoder(1, QDIM, VDIM, h).to(DEVICE)
+        dec = TransformerDecoder(1, QDIM, VDIM, h).to(DEVICE)
 
         q_enc, k_enc = enc(x)
         out = dec(x, q_enc, k_enc, None)

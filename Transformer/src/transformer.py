@@ -6,7 +6,8 @@ Deniz A. ACAR
 """
 
 from torch import (
-    Tensor, bmm, dropout, cat
+    Tensor, bmm, dropout, cat,
+    transpose
     )   
 from torch.nn import Module, ModuleList, Linear
 from torch.nn.functional import softmax, leaky_relu, relu
@@ -124,7 +125,7 @@ class MultiHeadAttention(Module):
         self.linear_k = LinearProject(dk, dk//h, n=h)
         self.linear_v = LinearProject(dv, dv//h, n=h)
 
-        self.W0 = Linear(int(h*dm), dm)
+        self.W0 = Linear(dm, dm)
         self.dropout = dropout
 
     def forward(self, q, k, v, mask=None):
@@ -132,7 +133,6 @@ class MultiHeadAttention(Module):
         qs = self.linear_q(q)
         ks = self.linear_k(k)
         vs = self.linear_v(v)
-
         for ele in range(self.h):
             out.append(
                 scaledDotProductAttention(
@@ -141,16 +141,54 @@ class MultiHeadAttention(Module):
             )
         output = cat(out, 2)
         return self.W0(output)
-        
+
+ 
+class MultiHeadAttentionLinformer(Module):
+    "Implementation of the MultiHead Attention"
+
+    def __init__(self, dm, dq, dk, dv, dl, h=2, dropout=None) -> None:
+        super().__init__()
+        self.h = h
+        # project q, k, v
+        self.linear_q = LinearProject(dq, dq//h, n=h)
+        self.linear_k = LinearProject(dk, dk//h, n=h)
+        self.linear_v = LinearProject(dv, dv//h, n=h)
+        self.proj_k = LinearProject(dk, dl, n=h)
+        self.proj_v = LinearProject(dv, dl, n=h)
+
+        self.W0 = Linear(dm, dm)
+        self.dropout = dropout
+
+    def forward(self, q, k, v, mask=None):
+        out = []
+        qs = self.linear_q(q)
+        ks = self.linear_k(k)
+        es = self.proj_k(k)
+        vs = self.linear_v(v)
+        fs = self.proj_v(v)
+        for ele in range(self.h):
+            out.append(
+                scaledDotProductAttention(
+                    qs[ele], 
+                    bmm(transpose(es[ele], 1, 2), ks[ele]), 
+                    bmm(transpose(fs[ele], 1, 2), vs[ele]), 
+                    mask, self.dropout
+                )
+            )
+        output = cat(out, 2)
+        return self.W0(output)
+
+
 
 
 
 if __name__ == "__main__":
 
     device = torch.device("cuda:0")
-
-    x = torch.randn(1,2,50).to(device)
-    a = KQV(50, 256,256,10).to(device)
-    print(a)
-    b = a(x)
-    print(scaledDotProductAttention(*b))
+    for i in range(1000):
+        x = torch.randn(10,10000,256).to(device)
+        a = KQV(256, 256,256,256).to(device)
+        b = MultiHeadAttentionLinformer(256, 256, 256, 256, 100, 4).to(device)
+        c = a(x)
+        print(b(*c).shape)
+    
