@@ -67,7 +67,7 @@ class MultiHeadedAtention(Module):
         scores = bmm(Query, Key.permute(0,2,1)) / sqrt(d_k)
         if mask is not None:
             scores = scores.masked_fill(mask == 0, minusinf)
-        scores = softmax(scores, dim=-2)
+        scores = softmax(scores, dim=-1)
         # apply dropout to the output of each sublayer
         if dropout is not None:
             return dropout(bmm(scores, Value))

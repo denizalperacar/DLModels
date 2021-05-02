@@ -7,9 +7,12 @@ Deniz A. ACAR
 
 from torch import (
     Tensor, bmm, dropout, cat,
-    transpose
+    transpose, ones, zeros
     )   
-from torch.nn import Module, ModuleList, Linear
+from torch.nn import (
+    Module, ModuleList, Linear, Dropout,
+    Parameter
+    )
 from torch.nn.functional import softmax, leaky_relu, relu
 from copy import deepcopy
 
@@ -33,7 +36,7 @@ def scaledDotProductAttention(
         scores = bmm(q, k.permute(0,2,1)) / sqrt(d_k)
         if mask is not None:
             scores = scores.masked_fill(mask == 0, minusinf)
-        scores = scaling(scores, dim=-2)
+        scores = scaling(scores, dim=-1)
         # apply dropout to the output of each sublayer
         if dropout is not None:
             return dropout(bmm(scores, v))
@@ -114,6 +117,34 @@ class KQV(Module):
                 self.dm, self.dq, self.dk, self.dv)    
 
 
+class LayerNorm(Module):
+    "Layer Norm Implementation"
+
+    def __init__(self, features, eps=1e-6) -> None:
+        super().__init__()
+        self.a2 = Parameter(ones(features))
+        self.b2 = Parameter(zeros(features))
+        self.eps = eps
+
+    def forward(self, x):
+        mean = x.mean(-1, keepdim=True)
+        std = x.std(-1, keepdim=True)
+        return self.a2 * (x - mean) / (std + self.eps) + self.b2
+
+
+class PositionWiseFF(Module):
+    "Position-wise feed forward element implementation."
+
+    def __init__(self, d_model, dff, dropout=0.1) -> None:
+        super().__init__()
+        self.w1 = Linear(d_model, dff)
+        self.w2 = Linear(dff, d_model)
+        self.dropout = Dropout(dropout)
+    
+    def forward(self, x):
+        return self.dropout(self.w2(relu(self.w1(x))))
+
+
 class MultiHeadAttention(Module):
     "Implementation of the MultiHead Attention"
 
@@ -182,6 +213,7 @@ class MultiHeadAttentionLinformer(Module):
 
 
 
+
 if __name__ == "__main__":
 
     device = torch.device("cuda:0")
@@ -190,5 +222,5 @@ if __name__ == "__main__":
         a = KQV(256, 256,256,256).to(device)
         b = MultiHeadAttentionLinformer(256, 256, 256, 256, 100, 4).to(device)
         c = a(x)
-        print(b(*c).shape)
+
     
