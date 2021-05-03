@@ -210,8 +210,160 @@ class MultiHeadAttentionLinformer(Module):
         return self.W0(output)
 
 
+class TransformerEncoderBase(Module):
+    "One layer of transformer encoder."
+
+    def __init__(
+            self, dm, dq, dk, dv, dl, h, 
+            dropout, linformer=False, 
+            norm=True, dff=512, dropout_r=0.1
+            ):
+        super().__init__()
+
+        self.norm = LayerNorm(dm) if norm else None
+        self.MHA = (
+            MultiHeadAttentionLinformer(
+                dm=dm, dq=dq, dk=dk, dv=dv,
+                dl=dl, h=h, dropout=dropout
+                ) if linformer else
+            MultiHeadAttention(
+                dm=dm, dq=dq, dk=dk, dv=dv,
+                h=h, dropout=dropout
+                ) 
+            )
+        self.PWFF = PositionWiseFF(
+            d_model=dm, dff=dff, 
+            dropout=dropout_r
+            )
+    
+    def forward(self, x, q, k, v, q_enc, k_enc, mask=None):
+        y = self.MHA(q,k,v, mask)
+        if self.norm is not None:
+            x = self.norm(x + y)
+        else:
+            x = x + y
+        y = self.PWFF(x)
+        if self.norm is not None:
+            x = self.norm(x + y)
+        else:
+            x = x + y        
+        return x
 
 
+class TransformerEncoder(Module):
+    "Implementation of the transformer Encoder."
+
+    def __init__(
+            self, N, dm, dq, dk, dv, dl, h, 
+            dropout, linformer=False, 
+            norm=True, dff=512, dropout_r=0.1):
+        super().__init__()
+        self.N = N
+        self.QKV = clone_module(
+            KQV(dm, dq, dk, dv), N
+            )
+        self.model = clone_module(
+            TransformerEncoderBase(
+                dm=dm, dq=dq, dk=dk, dv=dv, dl=dl, 
+                h=h, dropout=dropout, 
+                linformer=linformer, 
+                norm=norm, dff=dff, 
+                dropout_r=dropout_r
+                ), N
+            )
+        self.output = KQV(dm, dq, dk, 0)
+    
+    def forward(self, x, mask=None):
+        for ele in range(self.N):
+            q, k, v = self.QKV[ele](x)
+            x = self.model(x, q, k, v, mask)
+        q, k, _ = self.output(x)
+        return x, q, k
+
+
+class TransformerDecoderBase(Module):
+    "Implementation of one layer of the transformer decoder."
+
+    def __init__(
+            self, dm, dq, dk, dv, dl, h, 
+            dropout, linformer=False, 
+            norm=True, dff=512, dropout_r=0.1
+            ):
+        super().__init__()
+
+        self.norm = LayerNorm(dm) if norm else None
+        self.v = KQV(dm=dm, dq=0,dk=0, dv=dv)
+        self.MHA_first = (
+            MultiHeadAttentionLinformer(
+                dm=dm, dq=dq, dk=dk, dv=dv,
+                dl=dl, h=h, dropout=dropout
+                ) if linformer else
+            MultiHeadAttention(
+                dm=dm, dq=dq, dk=dk, dv=dv,
+                h=h, dropout=dropout
+                ) 
+            )
+        self.MHA_second = (
+            MultiHeadAttentionLinformer(
+                dm=dm, dq=dq, dk=dk, dv=dv,
+                dl=dl, h=h, dropout=dropout
+                ) if linformer else
+            MultiHeadAttention(
+                dm=dm, dq=dq, dk=dk, dv=dv,
+                h=h, dropout=dropout
+                ) 
+            )
+        self.PWFF = PositionWiseFF(
+            d_model=dm, dff=dff, 
+            dropout=dropout_r
+            )
+    
+    def forward(self, x, q, k, v, q_enc, k_enc, mask=None):
+        y = self.MHA_first(q,k,v, mask)
+        if self.norm is not None:
+            x = self.norm(x + y)
+        else:
+            x = x + y
+        y = self.MHA_second(q_enc,k_enc,self.v(x)[2], mask)
+        if self.norm is not None:
+            x = self.norm(x + y)
+        else:
+            x = x + y
+        y = self.PWFF(x)
+        if self.norm is not None:
+            x = self.norm(x + y)
+        else:
+            x = x + y        
+        return x
+
+
+class TransformerDecoder(Module):
+    "Implementation of the transformer decoder."
+
+    def __init__(
+            self, N, dm, dq, dk, dv, dl, h, 
+            dropout, linformer=False, 
+            norm=True, dff=512, dropout_r=0.1):
+        super().__init__()
+        self.N = N
+        self.QKV = clone_module(
+            KQV(dm, dq, dk, dv), N
+            )
+        self.model = clone_module(
+            TransformerDecoderBase(
+                dm=dm, dq=dq, dk=dk, dv=dv, dl=dl, 
+                h=h, dropout=dropout, 
+                linformer=linformer, 
+                norm=norm, dff=dff, 
+                dropout_r=dropout_r
+                ), N
+            )
+    
+    def forward(self, x, q_enc, k_enc, mask=None):
+        for ele in range(self.N):
+            q, k, v = self.QKV[ele](x)
+            x = self.model(x, q, k, v, q_enc, k_enc, mask)
+        return x
 
 
 if __name__ == "__main__":
@@ -220,7 +372,8 @@ if __name__ == "__main__":
     for i in range(1000):
         x = torch.randn(10,10000,256).to(device)
         a = KQV(256, 256,256,256).to(device)
-        b = MultiHeadAttentionLinformer(256, 256, 256, 256, 100, 4).to(device)
+        b = TransformerEncoder(8, 256, 256, 256, 256, 100, 8, Dropout(0.1), True, True, 512, 0.1).to(device)
         c = a(x)
+        print(c[0].shape)
 
     
