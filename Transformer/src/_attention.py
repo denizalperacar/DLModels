@@ -11,11 +11,6 @@ from time import time
 from copy import deepcopy
 from collections import OrderedDict
 
-import numpy as np 
-
-from torch.nn.modules.container import Sequential
-
-
 def clone(module, n):
     return ModuleList([deepcopy(module) for _ in range(n)])
 

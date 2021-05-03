@@ -6,7 +6,7 @@ Deniz A. ACAR
 """
 
 from torch import (
-    Tensor, bmm, dropout, cat,
+    Tensor, bmm, cat,
     transpose, ones, zeros
     )   
 from torch.nn import (
@@ -50,7 +50,7 @@ class LinearProject(Module):
 
     def __init__(
             self, in_features, out_features, 
-            n=1, bias=True, activation=None) -> Tensor:
+            n=1, bias=True) -> Tensor:
         super().__init__()
         self.__slots__ = ["in_features", "out_features", 
             "n", "bias", "activation", "projectors"]
@@ -59,7 +59,6 @@ class LinearProject(Module):
         self.out_features = out_features
         self.n = n
         self.bias = bias
-        self.activation = activation
 
         self.projectors = clone_module(
             Linear(
@@ -135,14 +134,15 @@ class LayerNorm(Module):
 class PositionWiseFF(Module):
     "Position-wise feed forward element implementation."
 
-    def __init__(self, d_model, dff, dropout=0.1) -> None:
+    def __init__(self, d_model, dff, dropout=0.1, activation=leaky_relu(0.1)) -> None:
         super().__init__()
+        self.activation = activation
         self.w1 = Linear(d_model, dff)
         self.w2 = Linear(dff, d_model)
         self.dropout = Dropout(dropout)
     
     def forward(self, x):
-        return self.dropout(self.w2(relu(self.w1(x))))
+        return self.dropout(self.w2(self.activation(self.w1(x))))
 
 
 class MultiHeadAttention(Module):
@@ -236,7 +236,7 @@ class TransformerEncoderBase(Module):
             dropout=dropout_r
             )
     
-    def forward(self, x, q, k, v, q_enc, k_enc, mask=None):
+    def forward(self, x, q, k, v, mask=None):
         y = self.MHA(q,k,v, mask)
         if self.norm is not None:
             x = self.norm(x + y)
@@ -271,14 +271,14 @@ class TransformerEncoder(Module):
                 dropout_r=dropout_r
                 ), N
             )
-        self.output = KQV(dm, dq, dk, 0)
+        self.output = KQV(dm, 0, dk, dv)
     
     def forward(self, x, mask=None):
         for ele in range(self.N):
             q, k, v = self.QKV[ele](x)
-            x = self.model(x, q, k, v, mask)
-        q, k, _ = self.output(x)
-        return x, q, k
+            x = self.model[ele](x, q, k, v, mask)
+        _, k, v = self.output(x)
+        return x, k, v
 
 
 class TransformerDecoderBase(Module):
@@ -292,7 +292,7 @@ class TransformerDecoderBase(Module):
         super().__init__()
 
         self.norm = LayerNorm(dm) if norm else None
-        self.v = KQV(dm=dm, dq=0,dk=0, dv=dv)
+        self.q = KQV(dm=dm, dq=dq,dk=0, dv=0)
         self.MHA_first = (
             MultiHeadAttentionLinformer(
                 dm=dm, dq=dq, dk=dk, dv=dv,
@@ -318,13 +318,13 @@ class TransformerDecoderBase(Module):
             dropout=dropout_r
             )
     
-    def forward(self, x, q, k, v, q_enc, k_enc, mask=None):
+    def forward(self, x, q, k, v, k_enc, v_enc, mask=None):
         y = self.MHA_first(q,k,v, mask)
         if self.norm is not None:
             x = self.norm(x + y)
         else:
             x = x + y
-        y = self.MHA_second(q_enc,k_enc,self.v(x)[2], mask)
+        y = self.MHA_second(self.q(x)[0], k_enc, v_enc, mask)
         if self.norm is not None:
             x = self.norm(x + y)
         else:
@@ -362,7 +362,7 @@ class TransformerDecoder(Module):
     def forward(self, x, q_enc, k_enc, mask=None):
         for ele in range(self.N):
             q, k, v = self.QKV[ele](x)
-            x = self.model(x, q, k, v, q_enc, k_enc, mask)
+            x = self.model[ele](x, q, k, v, q_enc, k_enc, mask)
         return x
 
 
@@ -370,10 +370,13 @@ if __name__ == "__main__":
 
     device = torch.device("cuda:0")
     for i in range(1000):
-        x = torch.randn(10,10000,256).to(device)
-        a = KQV(256, 256,256,256).to(device)
-        b = TransformerEncoder(8, 256, 256, 256, 256, 100, 8, Dropout(0.1), True, True, 512, 0.1).to(device)
-        c = a(x)
-        print(c[0].shape)
+        x1 = torch.randn(1,1000,256).to(device)
+        x2 = torch.randn(1,2000,256).to(device)
+
+        b = TransformerEncoder(4, 256, 256, 256, 256, 100, 8, Dropout(0.1), True, True, 256, 0.1).to(device)
+        c = TransformerDecoder(4, 256, 256, 256, 256, 100, 8, Dropout(0.1), True, True, 256, 0.1).to(device)
+
+        o1, k, v = b(x1)
+        o2 = c(x2, k, v)
 
     
