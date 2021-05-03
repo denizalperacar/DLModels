@@ -6,18 +6,17 @@ Deniz A. ACAR
 """
 
 from torch import (
-    Tensor, bmm, cat,
-    transpose, ones, zeros
+    Tensor, bmm, cat, randn,
+    transpose, ones, zeros,
+    device
     )   
 from torch.nn import (
     Module, ModuleList, Linear, Dropout,
-    Parameter
+    Parameter, Conv2d, LeakyReLU, Sequential
     )
-from torch.nn.functional import softmax, leaky_relu, relu
+from torch.nn.functional import softmax
 from copy import deepcopy
-
 from math import sqrt
-import torch
 
 
 def clone_module(module, n):
@@ -134,7 +133,7 @@ class LayerNorm(Module):
 class PositionWiseFF(Module):
     "Position-wise feed forward element implementation."
 
-    def __init__(self, d_model, dff, dropout=0.1, activation=leaky_relu(0.1)) -> None:
+    def __init__(self, d_model, dff, dropout=0.1, activation=LeakyReLU(0.1)) -> None:
         super().__init__()
         self.activation = activation
         self.w1 = Linear(d_model, dff)
@@ -278,7 +277,7 @@ class TransformerEncoder(Module):
             q, k, v = self.QKV[ele](x)
             x = self.model[ele](x, q, k, v, mask)
         _, k, v = self.output(x)
-        return x, k, v
+        return k, v
 
 
 class TransformerDecoderBase(Module):
@@ -366,17 +365,59 @@ class TransformerDecoder(Module):
         return x
 
 
+class Embedd(Module):
+    "Embedd the inputs"
+
+    def __init__(self, in_channels=6, out_dim=256, activation=LeakyReLU(0.2)) -> None:
+        super().__init__()
+
+        self.out_dim = out_dim
+        self.block = Sequential()
+        self.block.add_module(
+            "conv_1", Conv2d(in_channels, int(out_dim//2), 4, 2)
+        )
+        self.block.add_module("a1", activation)
+        self.block.add_module(
+            "conv_2", Conv2d(int(out_dim//2), int(out_dim//2), 4, 3)
+        )
+        self.block.add_module("a2", activation)
+        self.block.add_module(
+            "conv_3", Conv2d(int(out_dim//2), out_dim, 4, 1)
+        )
+        self.block.add_module("a3", activation)
+
+    def forward(self, x):
+        out = []
+        x_s = x.shape
+        for ele in x:
+            out.append(self.block(ele).reshape(1, x_s[1], self.out_dim))
+        y = cat(out, 0)
+        return y
+
+
 if __name__ == "__main__":
 
-    device = torch.device("cuda:0")
+    dev = device("cuda:0")
+
     for i in range(1000):
-        x1 = torch.randn(1,1000,256).to(device)
-        x2 = torch.randn(1,2000,256).to(device)
 
-        b = TransformerEncoder(4, 256, 256, 256, 256, 100, 8, Dropout(0.1), True, True, 256, 0.1).to(device)
-        c = TransformerDecoder(4, 256, 256, 256, 256, 100, 8, Dropout(0.1), True, True, 256, 0.1).to(device)
+        n = 1000
+        l = 256
 
-        o1, k, v = b(x1)
-        o2 = c(x2, k, v)
+        
+        a = Embedd(6, 256).to(dev)
+        d = TransformerEncoder(4, 256, 256, 256, 256, 100, 8, Dropout(0.1), True, True, 256, 0.1).to(dev)
+        e = TransformerDecoder(4, 256, 256, 256, 256, 100, 8, Dropout(0.1), True, True, 256, 0.1).to(dev)
+        
+
+
+        out = []
+        x1 = randn(2, n, 6, 32, 32).to(dev)
+        x2 = randn(2, n, 6, 32, 32).to(dev)
+        y1 = a(x1)
+        y2 = a(x2)
+        k, v = d(y1)
+        o2 = e(y2, k, v)
+        print(o2.shape)
 
     
