@@ -1,0 +1,13 @@
+geometry_learner/data/data.pickle
+net_100
+net_200
+net_300
+net_1000
+net_2000
+net_3000
+net_4000
+net_6000
+net_8000
+net_10000
+net_20000
+geometry_learner/tests/performer-pytorch-main/examples/enwik8_simple/data/enwik8.gz

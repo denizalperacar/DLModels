@@ -8,15 +8,17 @@ Deniz A. ACAR
 from torch import (
     Tensor, bmm, cat, randn,
     transpose, ones, zeros,
-    device
+    device, from_numpy
     )   
 from torch.nn import (
     Module, ModuleList, Linear, Dropout,
-    Parameter, Conv2d, LeakyReLU, Sequential
+    Parameter, Conv2d, LeakyReLU, Sequential,
+    ConvTranspose2d
     )
 from torch.nn.functional import softmax
 from copy import deepcopy
 from math import sqrt
+from numpy import triu, ones as npones
 
 
 def clone_module(module, n):
@@ -41,6 +43,12 @@ def scaledDotProductAttention(
             return dropout(bmm(scores, v))
         else:
             return bmm(scores, v)
+
+
+def subsequent_mask(size):
+    attn_shape = (1, size, size)
+    np_mask = triu(npones(attn_shape), k=1).astype('uint8')
+    return from_numpy(np_mask) == 0
 
 
 class LinearProject(Module):
@@ -395,29 +403,51 @@ class Embedd(Module):
         return y
 
 
+class Translate(Module):
+    "Translate the output."
+
+    def __init__(self, in_channels=256, out_dim=6, activation=LeakyReLU(0.2)):
+        super().__init__()
+
+        self.out_dim = out_dim
+        self.block = Sequential()
+        self.block.add_module(
+            "tconv_1", Conv2d(in_channels, int(out_dim//2), 4, 2)
+        )
+        self.block.add_module("a1", activation)
+        self.block.add_module(
+            "tconv_2", Conv2d(int(out_dim//2), int(out_dim//2), 4, 3)
+        )
+        self.block.add_module("a2", activation)
+        self.block.add_module(
+            "tconv_3", Conv2d(int(out_dim//2), out_dim, 4, 1)
+        )
+        self.block.add_module("a3", activation) 
+
 if __name__ == "__main__":
 
     dev = device("cuda:0")
+    k = 100
+    a = Embedd(6, 256).to(dev)
+    d = TransformerEncoder(4, 256, 256, 256, 256, k, 8, Dropout(0.1), False, True, 256, 0.1).to(dev)
+    e = TransformerDecoder(4, 256, 256, 256, 256, k, 8, Dropout(0.1), False, True, 256, 0.1).to(dev)
 
     for i in range(1000):
 
-        n = 1000
+        n = 256
         l = 256
 
-        
-        a = Embedd(6, 256).to(dev)
-        d = TransformerEncoder(4, 256, 256, 256, 256, 100, 8, Dropout(0.1), True, True, 256, 0.1).to(dev)
-        e = TransformerDecoder(4, 256, 256, 256, 256, 100, 8, Dropout(0.1), True, True, 256, 0.1).to(dev)
-        
+        m = subsequent_mask(n).to(dev)        
 
 
         out = []
-        x1 = randn(2, n, 6, 32, 32).to(dev)
-        x2 = randn(2, n, 6, 32, 32).to(dev)
+        x1 = randn(1, n, 6, 32, 32).to(dev)
+        x2 = randn(1, n, 6, 32, 32).to(dev)
+        
         y1 = a(x1)
         y2 = a(x2)
         k, v = d(y1)
-        o2 = e(y2, k, v)
+        o2 = e(y2, k, v, m)
         print(o2.shape)
-
+    
     
