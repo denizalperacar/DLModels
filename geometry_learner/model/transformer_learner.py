@@ -570,7 +570,7 @@ if __name__ == "__main__":
 
     net = Model().to(DEVICE)
     net = load('net')
-    network_opimizer = Adam(net.parameters(), lr=1.e-4)
+    network_opimizer = Adam(net.parameters(), lr=1.e-5)
     loss_fn = BCELoss()
     # prepare dataset
     # convertToArray(address)
@@ -618,5 +618,4 @@ if __name__ == "__main__":
                                     element_loss.max(), 
                                     element_loss.min(),
                                     time()-t))
-    
-    """
+"""
