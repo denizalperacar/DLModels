@@ -3,6 +3,103 @@ from scipy import interpolate
 import matplotlib.pyplot as plt
 from torch.nn import LSTM, Module, LeakyReLU, Sequential, Linear
 import torch
+import math, random
+from time import time
+import multiprocessing as mp
+import pickle
+
+
+def array(*args, **kwargs):
+    kwargs.setdefault("dtype", np.float64)
+    return np.array(*args, **kwargs)
+
+
+def generatePoint( p1, p2, irregularity, spikeyness, numVerts ) :  
+    
+    if p2[0] == p1[0] and p2[1] == p1[1]:
+        print("ERROR p1=p2")
+        return
+
+    '''    
+    Params:
+    p1, p2 - coordinates of the ends of the line
+    aveRadius - in px, the average radius of this polygon, this roughly controls how large the polygon is, really only useful for order of magnitude.
+    irregularity - [0,1] indicating how much variance there is in the angular spacing of vertices. [0,1] will map to [0, 2pi/numberOfVerts]
+    spikeyness - [0,1] indicating how much variance there is in each vertex from the circle of radius aveRadius. [0,1] will map to [0, aveRadius]
+    numVerts - self-explanatory
+
+    Returns a list of vertices, in CCW order.
+    '''
+    length = ( ( p1[0] - p2[0] )**2+ ( p1[1] - p2[1] )**2 )**0.5
+    irregularity = clip( irregularity, 0,1 ) * length / numVerts
+    spikeyness = clip( spikeyness, 0,1 ) * length
+
+    # generate n  steps
+    LengthSteps = []
+    lower = (length / numVerts) - irregularity
+    upper = (length / numVerts) + irregularity
+    sum = 0
+    for i in range(numVerts) :
+        tmp = random.uniform(lower, upper)
+        LengthSteps.append( tmp )
+        sum = sum + tmp
+
+    # normalize the steps 
+    k = sum / (length)
+    for i in range(numVerts) :
+        LengthSteps[i] = LengthSteps[i] / k
+
+    # now generate the points
+    points = [(p1[0],p1[1])]
+    t = 0
+
+    #slope of the line through p1-p2
+    m = ( p2[1] - p1[1]) / ( p2[0] - p1[0] )
+    angle_n = math.pi /2 + math.atan(m)
+    slope_ang = math.atan(m)
+    if p1[0] > p2[0]: angle_n += math.pi
+    if p1[0] > p2[0]: slope_ang += math.pi
+
+    ctrX = p1[0]
+    ctrY = p1[1]
+
+    for i in range(numVerts) :
+
+        if p2[0] == p1[0]:
+             ctrY += LengthSteps[i]
+
+        else:             
+             ctrX += LengthSteps[i] * math.cos(slope_ang)
+             ctrY += LengthSteps[i] * math.sin(slope_ang)
+            
+        r_i = clip( random.gauss((length / numVerts), spikeyness), 0, 2*(length / numVerts) )-(length / numVerts)
+        x = +ctrX + r_i * math.cos(angle_n)
+        y = +ctrY + r_i * math.sin(angle_n)
+        points.append([x,y])
+        
+    points.append([p2[0],p2[1]])
+
+
+    return np.array(points)
+
+
+def clip(x, min, max) :
+    if( min > max ) :  return x    
+    elif( x < min ) :  return min
+    elif( x > max ) :  return max
+    else :             return x
+
+
+def calculate_normal(vect, normalized=True):
+
+    r2 = (vect[2] - vect[1]) / 2.
+    r1 = (vect[1] - vect[0]) / 2.
+    dx, dy = (r2 + r1)
+    norm = (dx**2. + dy**2.)**0.5
+    if normalized:
+        return np.array([-dy/norm, dx/norm])
+    else:
+        return np.array([-dy, dx])
 
 
 class Point:
@@ -13,25 +110,67 @@ class Point:
 
 class Curve:
     
-    def __init__(self, points, order=3):
-        
-        points = np.array(points)
+    def __init__(self, points, order=3, rot=1):
+        """rot indicates the normal direction 
+        in the frenet frame on the curve in 2d it 
+        is the direction of the k vector
+        """ 
+
+        points = np.array(points)[::rot]
+        self.norm = (((points[-1] - points[0]) ** 2.).sum())**0.5
         self.x = points[:, 0]
         self.y = points[:, 1]
-        self.order = 3
+        self.order = order
+        self.rot = rot
         self.spline, _ = interpolate.splprep(
             [self.x,self.y],
             k=3,
             )
         
     def interpret(self, t):
-        assert(t.max()<=1 and t.min()>= 0), "t out of renge"
-        return interpolate.splev(t, self.spline)
+        t = np.array(t)
+        assert (t.max()<=1. and t.min()>= 0.), "t out of range"
+        return np.array(interpolate.splev(t, self.spline)).T
 
     def plot(self, t, ax):
+        r = random.random()
+        b = random.random()
+        g = random.random()
+        color = (r, g, b)
         out = self.interpret(t)
-        plt.plot(out[0], out[1], 'b')
+        ax.plot(out[:,0], out[:,1], 'b', c=color)
     
+    def get_normal(self, t, eps=1e-8, normalize=True):
+        n = []
+        t = np.array(t)
+        pts = []
+        for ts in t:
+            low = ts - eps if (ts - eps) > 0. else ts
+            upp = ts + eps if (ts + eps) < 1. else ts 
+            n.append(
+                calculate_normal(
+                    self.interpret([low, ts, upp]), normalize
+                    )
+                )
+            pts.append(self.interpret([low, ts, upp]).T)
+        return np.array(n)
+
+    def plot_normal(self, t, ax):
+        norm = self.norm if self.norm > 1 else 1./ self.norm
+        n = self.get_normal(t)
+        v = self.interpret(t)
+        pts = v + n * 0.1
+        ax.scatter(v[:,0], v[:,1], s=1)
+        ax.scatter(pts[:,0], pts[:, 1], s=1)
+
+    def get_curve_data(self, n =10000):
+        t = np.linspace(0,1,n+1)
+        p = self.interpret(t)
+        n = self.get_normal(t, normalize=False)
+        length = ((((p[1:,:] - p[:-1,:])**2.).sum(axis=-1))**0.5).sum()
+        green = -(p * n).sum() / 2.
+        return length, green
+
 
 class Encoder(Module):
 
@@ -90,15 +229,74 @@ class ARCLENDecoder(Module):
         return self.model(y)
 
 
+def return_data(num=1000):
+    data = {}
+    data['params'] = [
+        np.random.randint(0,10000, 2) * np.random.randn(2) / 1000.,
+        np.random.randint(0,10000, 2) * np.random.randn(2) / 1000.,
+        abs(0.4), # * np.random.randn()),
+        abs(0.4), # * np.random.randn()),
+        np.random.randint(3,50)
+        ]
+    kk = data['params']
+    data['vetices']  = generatePoint(
+        kk[0], kk[1], irregularity=kk[2], 
+        spikeyness=kk[3], numVerts=kk[4]
+        )
+    data['curve'] = Curve(
+        np.array(data['vetices']).astype(np.float64), 3
+        )
+    data['query'] = {}
+    data['query']['points'] = np.random.uniform(0,1, num)
+    data['query']['out'] = np.concatenate([
+        data['curve'].interpret(data['query']['points']),
+        data['curve'].get_normal(data['query']['points']),
+    ], axis=-1)
+    data['length'], data['green'] = data['curve'].get_curve_data()
+    return data
 
+
+def get_data(n=1, num=1000):
+
+    l = list(range(n))
+
+    pool = mp.Pool(3)
+    l[:] = pool.map(return_data, (num for _ in range(n)))
+
+    return l
 
 
 if __name__ == "__main__":
-
-    ctr =np.array( [(3 , 1), (2.5, 4), (0, 1), (-2.5, 4),
-                (-3, 0), (-2.5, -4), (0, -1), (2.5, -4), (3, -1)])    
-    c = Curve(ctr, 3)
+    
+    t = time()
+    ls = []
+    start = 46
+    for kk in range(5000):
+        ls.append(get_data(100, np.random.randint(500, 1000)))
+        if kk % 10 == 0 and kk != 0:
+            with open(f'./dataset/data_{kk//10+start}.pickle', 'wb') as fid:
+                pickle.dump(ls, fid)
+            ls = []
+            print(time()-t)
+            t = time()
+    
+    """
     ax = plt.subplot()
-    t = np.linspace(0,1,num=50,endpoint=True)  
+    kk = [
+        np.random.randint(0,10000, 2) * np.random.randn(2) / 1000.,
+        np.random.randint(0,10000, 2) * np.random.randn(2) / 1000.,
+        abs(0.6), # * np.random.randn()),
+        abs(0.6), # * np.random.randn()),
+        20
+    ]
+    verts = generatePoint(kk[0], kk[1], irregularity=kk[2], spikeyness=kk[3], numVerts=kk[4])
+    c = Curve(np.array(verts).astype(np.float64), 3)
+    t = np.linspace(0,1,num=2001, endpoint=True)
+    t1 = np.linspace(0,1,1001)
     c.plot(t, ax)
-    plt.show()
+    c.plot_normal(t1, ax)
+    print(c.get_curve_data())
+    print(((verts[-1] - verts[0])**2.).sum()**0.5)
+    plt.axis('equal')
+    plt.show() 
+    """
