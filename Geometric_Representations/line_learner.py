@@ -249,14 +249,15 @@ def return_data(num=1000):
         kk[0], kk[1], irregularity=kk[2], 
         spikeyness=kk[3], numVerts=kk[4]
         )
-    data['curve'] = Curve(
+    curve = Curve(
         np.array(data['vetices']).astype(np.float64), 3
         )
+    data['curve'] = curve.__dict__
     data['query'] = {}
     data['query']['points'] = np.random.uniform(0,1, num+1)
     data['query']['out'] = np.concatenate([
-        data['curve'].interpret(data['query']['points']),
-        data['curve'].get_normal(data['query']['points']),
+        curve.interpret(data['query']['points']),
+        curve.get_normal(data['query']['points']),
     ], axis=-1)
     return data
 
@@ -271,10 +272,9 @@ def get_data(n=1, num=1000):
     return l
 
 
-
 t = time()
 ls = []
-start = 431
+start = 0
 for kk in range(1000):
     ls.append(get_data(100, np.random.randint(500, 1000)))
     if kk % 10 == 0 and kk != 0:
