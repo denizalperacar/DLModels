@@ -110,14 +110,15 @@ class Point:
 
 class Curve:
     
-    def __init__(self, points, order=3, rot=1):
+    def __init__(self, points, order=3, rot=1, numpts=1000):
         """rot indicates the normal direction 
         in the frenet frame on the curve in 2d it 
         is the direction of the k vector
         """ 
 
         points = np.array(points)[::rot]
-        self.norm = (((points[-1] - points[0]) ** 2.).sum())**0.5
+        self.length = (((points[-1] - points[0]) ** 2.).sum())**0.5
+        self.npts = numpts
         self.x = points[:, 0]
         self.y = points[:, 1]
         self.order = order
@@ -126,6 +127,10 @@ class Curve:
             [self.x,self.y],
             k=3,
             )
+        ts = np.linspace(0,1,num=numpts+1, endpoint=True)
+        self.normal = self.get_normal(ts)
+        self.curve_length, self.green = self.get_curve_data(numpts)
+
         
     def interpret(self, t):
         t = np.array(t)
@@ -149,26 +154,27 @@ class Curve:
             upp = ts + eps if (ts + eps) < 1. else ts 
             n.append(
                 calculate_normal(
-                    self.interpret([low, ts, upp]), normalize
+                    self.interpret([low, ts, upp]), 
+                    normalize
                     )
                 )
             pts.append(self.interpret([low, ts, upp]).T)
         return np.array(n)
 
     def plot_normal(self, t, ax):
-        norm = self.norm if self.norm > 1 else 1./ self.norm
+        # norm = self.length if self.length > 1 else 1./ self.length
         n = self.get_normal(t)
         v = self.interpret(t)
         pts = v + n * 0.1
         ax.scatter(v[:,0], v[:,1], s=1)
         ax.scatter(pts[:,0], pts[:, 1], s=1)
 
-    def get_curve_data(self, n =10000):
+    def get_curve_data(self, n=1000):
         t = np.linspace(0,1,n+1)
         p = self.interpret(t)
-        n = self.get_normal(t, normalize=False)
-        length = ((((p[1:,:] - p[:-1,:])**2.).sum(axis=-1))**0.5).sum()
-        green = -(p * n).sum() / 2.
+        ns = self.get_normal(t, normalize=False, eps=1/n)
+        length = ((((p[1:,:] - p[:-1,:])**2.).sum(axis=1))**0.5).sum()
+        green = -(p * ns).sum() / 2.
         return length, green
 
 
@@ -247,12 +253,11 @@ def return_data(num=1000):
         np.array(data['vetices']).astype(np.float64), 3
         )
     data['query'] = {}
-    data['query']['points'] = np.random.uniform(0,1, num)
+    data['query']['points'] = np.random.uniform(0,1, num+1)
     data['query']['out'] = np.concatenate([
         data['curve'].interpret(data['query']['points']),
         data['curve'].get_normal(data['query']['points']),
     ], axis=-1)
-    data['length'], data['green'] = data['curve'].get_curve_data()
     return data
 
 
@@ -266,37 +271,40 @@ def get_data(n=1, num=1000):
     return l
 
 
-if __name__ == "__main__":
-    
-    t = time()
-    ls = []
-    start = 46
-    for kk in range(5000):
-        ls.append(get_data(100, np.random.randint(500, 1000)))
-        if kk % 10 == 0 and kk != 0:
-            with open(f'./dataset/data_{kk//10+start}.pickle', 'wb') as fid:
-                pickle.dump(ls, fid)
-            ls = []
-            print(time()-t)
-            t = time()
-    
-    """
-    ax = plt.subplot()
-    kk = [
-        np.random.randint(0,10000, 2) * np.random.randn(2) / 1000.,
-        np.random.randint(0,10000, 2) * np.random.randn(2) / 1000.,
-        abs(0.6), # * np.random.randn()),
-        abs(0.6), # * np.random.randn()),
-        20
-    ]
-    verts = generatePoint(kk[0], kk[1], irregularity=kk[2], spikeyness=kk[3], numVerts=kk[4])
-    c = Curve(np.array(verts).astype(np.float64), 3)
-    t = np.linspace(0,1,num=2001, endpoint=True)
-    t1 = np.linspace(0,1,1001)
-    c.plot(t, ax)
-    c.plot_normal(t1, ax)
-    print(c.get_curve_data())
-    print(((verts[-1] - verts[0])**2.).sum()**0.5)
-    plt.axis('equal')
-    plt.show() 
-    """
+
+t = time()
+ls = []
+start = 431
+for kk in range(1000):
+    ls.append(get_data(100, np.random.randint(500, 1000)))
+    if kk % 10 == 0 and kk != 0:
+        with open(f'./dataset/data_{kk//10+start}.pickle', 'wb') as fid:
+            pickle.dump(ls, fid)
+        ls = []
+        print(time()-t)
+        t = time()
+
+"""
+ax = plt.subplot()
+kk = [
+    np.array([1,1]),
+    np.array([2,3]),
+    abs(0.6), # * np.random.randn()),
+    abs(0.6), # * np.random.randn()),
+    20
+]
+
+# verts = generatePoint(kk[0], kk[1], irregularity=kk[2], spikeyness=kk[3], numVerts=kk[4])
+verts = np.array([np.linspace(5, 1,10), np.linspace(1,3,10)]).T
+c = Curve(np.array(verts).astype(np.float64), 3, numpts=10000)
+
+
+t = np.linspace(0,1,num=2001, endpoint=True)
+t1 = np.linspace(0,1,1001)
+c.plot(t, ax)
+c.plot_normal(t1, ax)
+print(c.get_curve_data())
+print(((verts[-1] - verts[0])**2.).sum()**0.5)
+plt.axis('equal')
+plt.show()
+"""
